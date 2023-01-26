@@ -7,7 +7,7 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const jwt = require('express-jwt');
+var { expressjwt: jwt } = require('express-jwt');
 const jwksRsa = require('jwks-rsa');
 
 // in-memory "database"
@@ -36,13 +36,31 @@ app.use(cors());
 // adding morgan to log HTTP requests
 app.use(morgan('combined'));
 
+const client = jwksRsa({
+  jwksUri: `https://${process.env.OIDC_PROVIDER}/.well-known/jwks.json`
+});
+
+function getSecret(req, token) {
+  const { kid } = token.header;
+  return new Promise((resolve, reject) => {
+    client.getSigningKey(kid, function(err, key) {
+      if (err) {
+        reject(err);
+      }
+      resolve(key.publicKey || key.rsaPublicKey);
+    });
+  });
+}
+
 const checkJwt = jwt({
-  secret: jwksRsa.expressJwtSecret({
-    cache: true,
-    rateLimit: true,
-    jwksRequestsPerMinute: 5,
-    jwksUri: `https://${process.env.OIDC_PROVIDER}/.well-known/jwks.json`
-  }),
+  // secret: jwksRsa.expressJwtSecret({
+  //   cache: true,
+  //   rateLimit: true,
+  //   jwksRequestsPerMinute: 5,
+  //   jwksUri: `https://${process.env.OIDC_PROVIDER}/.well-known/jwks.json`
+  // }),
+
+  secret: getSecret,
 
   // Validate the audience and the issuer.
   audience: process.env.API_IDENTIFIER,
@@ -54,7 +72,7 @@ app.use(checkJwt);
 
 function hasScope(requiredScope) {
   return function(req, res, next) {
-    const { scope } = req.user;
+    const { scope } = req.auth;
     const scopeArray = scope.split(' ');
     if (!scopeArray.includes(requiredScope)) {
       return res.status(403).send({ message: 'Insufficient authorization.' });
